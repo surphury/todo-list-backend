@@ -2,17 +2,15 @@ use actix_web::{
 	test::{call_and_read_body, call_and_read_body_json, init_service, TestRequest},
 	web::Bytes,
 };
-use mongodb::Client;
+
+use mongo::connect;
 
 use super::*;
 
 #[actix_web::test]
 #[ignore = "requires MongoDB instance running"]
 async fn test() {
-	let uri = std::env::var("MONGODB_URI").expect("MONGODB_URI must be set");
-
-	let client = Client::with_uri_str(uri).await.expect("failed to connect");
-
+	let client = connect().await;
 	// Clear any data currently in the users collection.
 	client
 		.database(DB_NAME)
