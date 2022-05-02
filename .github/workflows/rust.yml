@@ -8,15 +8,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  MONGODB_URI: ${{ secrets.MONGODB_URI }}
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-    env:
-      MONGODB_URI: ${{ secrets.MONGODB_URI }}
     steps:
-    
     - uses: actions/checkout@v3
     - name: Build
       run: cargo build --verbose
