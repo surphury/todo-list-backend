@@ -1,29 +1,48 @@
 #[cfg(test)]
 mod test;
 
+mod confirm;
 mod model;
 mod mongo;
 
+use confirm::send_confirmation_email;
+
+use uuid::Uuid;
+
 use std::io::Result;
 
-/* use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation}; */
-
-/* use serde::{Deserialize, Serialize}; */
-
-use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer};
+use actix_web::{
+	delete, get, post,
+	web::{Data, Json, Path},
+	App, HttpResponse, HttpServer,
+};
 use mongo::connect;
 use mongodb::{bson::doc, Client, Collection};
 
-use model::User;
+use model::{NewUser, UnconfirmedUser};
 
 const DB_NAME: &str = "market";
-const COLL_NAME: &str = "users";
+const COLL_NAME: &str = "new_users";
 
 /// Adds a new user to the "users" collection in the database.
 #[post("/user")]
-async fn add_user(client: web::Data<Client>, form: web::Json<User>) -> HttpResponse {
+async fn add_user(client: Data<Client>, form: Json<NewUser>) -> HttpResponse {
+	let key = Uuid::new_v4();
+	let user = UnconfirmedUser {
+		email: form.email.clone(),
+		username: form.username.clone(),
+		key: key.to_string(),
+	};
+	loop {
+		match send_confirmation_email(&user).await {
+			Ok(_) => break,
+			Err(err) => {
+				println!("{:?}", err)
+			}
+		}
+	}
 	let collection = client.database(DB_NAME).collection(COLL_NAME);
-	let result = collection.insert_one(form.into_inner(), None).await;
+	let result = collection.insert_one(user, None).await;
 	match result {
 		Ok(_) => HttpResponse::Ok().body("user added"),
 		Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
@@ -31,8 +50,8 @@ async fn add_user(client: web::Data<Client>, form: web::Json<User>) -> HttpRespo
 }
 
 #[delete("/user")]
-async fn delete_user(client: web::Data<Client>, form: web::Json<User>) -> HttpResponse {
-	let collection = client.database(DB_NAME).collection::<User>(COLL_NAME);
+async fn delete_user(client: Data<Client>, form: Json<NewUser>) -> HttpResponse {
+	let collection = client.database(DB_NAME).collection::<NewUser>(COLL_NAME);
 	let result = collection
 		.find_one_and_delete(doc! { "username" : &form.username }, None)
 		.await;
@@ -44,9 +63,9 @@ async fn delete_user(client: web::Data<Client>, form: web::Json<User>) -> HttpRe
 
 /// Gets the user with the supplied username.
 #[get("/user/{username}")]
-async fn get_user(client: web::Data<Client>, username: web::Path<String>) -> HttpResponse {
+async fn get_user(client: Data<Client>, username: Path<String>) -> HttpResponse {
 	let username = username.into_inner();
-	let collection: Collection<User> = client.database(DB_NAME).collection(COLL_NAME);
+	let collection: Collection<NewUser> = client.database(DB_NAME).collection(COLL_NAME);
 	match collection
 		.find_one(doc! { "username": &username }, None)
 		.await
@@ -68,7 +87,7 @@ async fn main() -> Result<()> {
 	};
 	HttpServer::new(move || {
 		App::new()
-			.app_data(web::Data::new(client.clone()))
+			.app_data(Data::new(client.clone()))
 			.service(add_user)
 			.service(get_user)
 			.service(delete_user)
