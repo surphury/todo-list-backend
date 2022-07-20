@@ -1,92 +1,39 @@
-use actix_web::{
-	test::{call_and_read_body, call_and_read_body_json, init_service, TestRequest},
-	web::Bytes,
-};
+use super::rocket;
 
-use super::*;
+use rocket::fairing::AdHoc;
+use rocket::http::ContentType;
+use rocket::tokio::sync::Barrier;
+use rocket::{Build, Rocket};
 
-#[actix_web::test]
-async fn can_add_new_users() {
-	let database_url: String =
-		std::env::var("DATABASE_URL").expect("DATABASE_URL must be set as a environment variable");
-	let pool = connect(database_url).await;
+use rocket::serde::json::Json;
 
-	let app = init_service(
-		App::new()
-			.app_data(Data::new(pool))
-			.service(add_user)
-			.service(get_user)
-			.service(delete_user),
-	)
-	.await;
+use super::routes::{get_tasks, login, post_task, register_user};
 
-	let user = NewUser {
-		username: "janedoe".into(),
-		email: "example@example.com".into(),
-	};
+use super::model::{Db, Login, Task, User};
 
-	let req = TestRequest::post()
-		.uri("/user")
-		.set_form(&user)
-		.to_request();
+#[rocket::async_test]
+async fn add_user_and_login() {
+    use rocket::local::asynchronous::Client;
 
-	let response = call_and_read_body(&app, req).await;
-	assert_eq!(response, Bytes::from_static(b"user added"));
+    let client = Client::tracked(rocket()).await.unwrap();
 
-	let req = TestRequest::get()
-		.uri(&format!("/user/{}", &user.username))
-		.to_request();
+    let user = User {
+        username: String::from("jose261004"),
+        email: String::from("jose261004@gmail.com"),
+        password: String::from("jose261004"),
+    };
 
-	let response: NewUser = call_and_read_body_json(&app, req).await;
-	assert_eq!(response, user);
-
-	let req = TestRequest::delete()
-		.uri("/user")
-		.set_form(&user)
-		.to_request();
-
-	let response: NewUser = call_and_read_body_json(&app, req).await;
-	assert_eq!(response, user);
+    let req = client
+        .post("/api/")
+        .header(ContentType::JSON)
+        .set_body(&user)
+        .dispatch();
 }
 
-/* #[actix_web::test]
-async fn can_delete_users() {
-	let client = connect().await;
-	client
-		.database(DB_NAME)
-		.collection::<NewUser>(COLL_NAME)
-		.drop(None)
-		.await
-		.expect("drop collection should succeed");
-
-	let app = init_service(
-		App::new()
-			.app_data(Data::new(client))
-			.service(add_user)
-			.service(get_user)
-			.service(delete_user),
-	)
-	.await;
-
-	let user = NewUser {
-		username: "janedoe".into(),
-		email: "example@example.com".into(),
-	};
-
-	let req = TestRequest::post()
-		.uri("/user")
-		.set_form(&user)
-		.to_request();
-
-	let response = call_and_read_body(&app, req).await;
-	assert_eq!(response, Bytes::from_static(b"user added"));
-
-	let req = TestRequest::delete()
-		.uri("/user")
-		.set_form(&user)
-		.to_request();
-
-	let response = call_and_read_body(&app, req).await;
-	assert_eq!(response, Bytes::from_static(b"user deleted"));
+pub fn rocket() -> Rocket<Build> {
+    rocket::build()
+        .mount("/api", routes![get_tasks, login, post_task, register_user])
+        .attach(AdHoc::on_ignite("", |rocket| async {
+            rocket.manage(Barrier::new(2))
+        }))
 }
- */
