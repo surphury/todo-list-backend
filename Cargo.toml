@@ -12,6 +12,7 @@ dotenv = "0.15.0"
 serde = { version = "1.0.140", features = ["derive"] }
 rust-argon2 = "1.0.0"
 jsonwebtoken = "8.1.1"
+actix-cors = "0.6.1"
 
 [dependencies.sqlx]
 version = "0.6.0"
