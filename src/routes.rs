@@ -1,58 +1,102 @@
+use crate::jwt::{generate_token, verify_token};
+
 use super::database::{add_task, get_tasks_by_user, insert_new_user, verify_password};
 
 use super::model::{Db, Login, Task, User};
 
-use rocket::http::Status;
-use rocket::serde::json::Json;
-use rocket::State;
+use actix_web::web::{Data, Json, Path};
+use actix_web::{get, post, HttpRequest, HttpResponse, Responder};
 
-#[post("/register_user", data = "<new_user>")]
-pub async fn register_user(new_user: Json<User>, db: &State<Db>) -> Status {
+#[post("/register_user")]
+pub async fn register_user(new_user: Json<User>, db: Data<Db>) -> impl Responder {
     let new_user = User {
         password: new_user.password.clone(),
         username: new_user.username.clone(),
         email: new_user.email.clone(),
     };
 
-    match insert_new_user(new_user, db).await {
-        Ok(_) => Status::Created,
-        Err(_) => Status::ExpectationFailed,
+    match insert_new_user(new_user, &db).await {
+        Ok(_) => HttpResponse::Ok().body("User added"),
+        Err(_) => HttpResponse::InternalServerError().body("Error adding user"),
     }
 }
 
-#[post("/login", data = "<user>")]
-pub async fn login(user: Json<Login>, db: &State<Db>) -> Status {
+#[post("/login")]
+pub async fn login(user: Json<Login>, db: Data<Db>) -> impl Responder {
     let user = Login {
         password: user.password.clone(),
         username: user.username.clone(),
     };
 
-    if verify_password(user, db).await {
-        Status::Ok
-    } else {
-        Status::Unauthorized
+    let users = verify_password(&user, &db).await;
+
+    match users {
+        Ok(users) => {
+            if users.len() == 1 {
+                let token = generate_token(&users[0]);
+
+                match token {
+                    Ok(token) => HttpResponse::Ok().json(token),
+                    Err(_) => HttpResponse::InternalServerError().body("Error generating token"),
+                }
+            } else {
+                HttpResponse::Unauthorized().body("Verification failed")
+            }
+        }
+        Err(_) => HttpResponse::InternalServerError().body("Error verifying user"),
     }
 }
 
-#[get("/tasks/<user_id>")]
-pub async fn get_tasks(user_id: i32, db: &State<Db>) -> Json<Vec<Task>> {
-    let tasks = get_tasks_by_user(user_id, db).await;
+#[get("/tasks/{user_id}")]
+pub async fn get_tasks(req: HttpRequest, user_id: Path<i32>, db: Data<Db>) -> impl Responder {
+    let token = req.headers().get("Authorization");
 
-    match tasks {
-        Ok(tasks) => Json(tasks),
-        Err(_) => Json(vec![]),
+    match token {
+        Some(token) => {
+            let token = verify_token(token.to_str().unwrap());
+
+            let user_id = user_id.into_inner();
+
+            match token {
+                Ok(_) => {
+                    let tasks = get_tasks_by_user(user_id, &db).await;
+                    match tasks {
+                        Ok(tasks) => HttpResponse::Ok().json(tasks),
+                        Err(_) => HttpResponse::InternalServerError().body("Error getting tasks"),
+                    }
+                }
+                Err(_) => HttpResponse::Unauthorized().body("Invalid token"),
+            }
+        }
+        _ => HttpResponse::Unauthorized().body("Verification failed"),
     }
 }
 
-#[post("/tasks/<user_id>", data = "<task>")]
-pub async fn post_task(user_id: i32, task: Json<Task>, db: &State<Db>) -> Status {
+#[post("/tasks")]
+pub async fn post_task(req: HttpRequest, task: Json<Task>, db: Data<Db>) -> impl Responder {
+    let token = req.headers().get("Authorization");
+
     let task = Task {
         name: task.name.clone(),
         description: task.description.clone(),
         done: task.done.clone(),
     };
-    match add_task(user_id, task, db).await {
-        Ok(_) => Status::Created,
-        Err(_) => Status::ExpectationFailed,
+
+    match token {
+        Some(token) => {
+            let decoded_token = verify_token(token.to_str().unwrap());
+
+            match decoded_token {
+                Ok(decoded_token) => {
+                    let user_id = decoded_token.claims.id_user;
+                    match add_task(user_id, task, &db).await {
+                        Ok(_) => HttpResponse::Ok().body("Task added"),
+                        Err(_) => HttpResponse::InternalServerError().body("Error getting tasks"),
+                    }
+                }
+                Err(_) => HttpResponse::Unauthorized().body("Invalid token"),
+            }
+        }
+        _ => HttpResponse::Unauthorized().body("Verification failed"),
     }
 }

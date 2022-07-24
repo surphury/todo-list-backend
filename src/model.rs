@@ -9,7 +9,13 @@ pub struct User {
     pub password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DBUser {
+    pub username: String,
+    pub id: i32,
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct Login {
     pub username: String,
     pub password: String,
@@ -31,4 +37,15 @@ pub struct DBTask {
     pub name: String,
     pub description: String,
     pub done: i8,
+}
+
+#[derive(Serialize)]
+pub struct Token {
+    pub token: String,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub struct Claims {
+    pub id_user: i32,
+    pub exp: i32,
 }
