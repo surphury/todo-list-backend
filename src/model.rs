@@ -1,3 +1,5 @@
+use actix_web::cookie::time::OffsetDateTime;
+
 use serde::{Deserialize, Serialize};
 
 use sqlx::mysql::MySqlPool;
@@ -26,17 +28,29 @@ pub struct Db {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct Task {
+pub struct NewTask {
     pub name: String,
     pub description: String,
-    pub done: bool,
+    pub status: i16,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Task {
+    pub id: i32,
+    pub name: String,
+    pub description: String,
+    pub status: i16,
+    pub start_time: Option<i64>,
+    pub finish_time: Option<i64>,
 }
 
 pub struct DBTask {
     pub id: i32,
     pub name: String,
     pub description: String,
-    pub done: i8,
+    pub status: i16,
+    pub start_time: Option<OffsetDateTime>,
+    pub finish_time: Option<OffsetDateTime>,
 }
 
 #[derive(Serialize)]
@@ -48,4 +62,9 @@ pub struct Token {
 pub struct Claims {
     pub id_user: i32,
     pub exp: i32,
+}
+
+#[derive(Deserialize /* Serialize */)]
+pub struct TaskId {
+    pub id: i32,
 }
