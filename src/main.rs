@@ -3,28 +3,29 @@ mod hashing;
 mod jwt;
 mod model;
 mod routes;
+mod utils;
 
 /* #[cfg(test)]
 mod test; */
-
-use dotenv::dotenv;
-
-use database::connect;
-
-use actix_cors::Cors;
 
 use actix_web::web::Data;
 use actix_web::{http, App, HttpServer};
 
 use sqlx::mysql::MySqlPool;
 
-use routes::{get_tasks, login, post_task, register_user};
-
 use std::env::var;
 use std::io;
 use std::result::Result;
 
+use actix_cors::Cors;
+
+use dotenv::dotenv;
+
+use database::connect;
+
 use model::Db;
+
+use routes::{delete_tasks, finish_task, get_tasks, login, post_task, register_user, start_task};
 
 #[actix_web::main]
 async fn main() -> Result<(), io::Error> {
@@ -56,6 +57,9 @@ async fn main() -> Result<(), io::Error> {
             .service(get_tasks)
             .service(post_task)
             .service(register_user)
+            .service(delete_tasks)
+            .service(start_task)
+            .service(finish_task)
     })
     .bind(("127.0.0.1", port))?
     .run()
