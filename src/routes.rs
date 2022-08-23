@@ -86,7 +86,6 @@ pub async fn post_task(req: HttpRequest, task: Json<NewTask>, db: Data<Db>) -> i
     let task = NewTask {
         name: task.name.clone(),
         description: task.description.clone(),
-        status: task.status.clone(),
     };
 
     match validate_token(authorization) {
@@ -107,7 +106,13 @@ pub async fn start_task(req: HttpRequest, task: Json<Task>, db: Data<Db>) -> imp
 
     match validate_token(authorization) {
         Ok(user_id) => match start_task_and_save_time(user_id, task.id, &db).await {
-            Ok(_) => HttpResponse::Ok().body("Task started"),
+            Ok(done) => HttpResponse::Ok().body({
+                if done {
+                    "Task started"
+                } else {
+                    "Task already started"
+                }
+            }),
             Err(error) => {
                 println!("{:?}", error);
                 HttpResponse::InternalServerError().body("Error starting tasks")
@@ -118,12 +123,18 @@ pub async fn start_task(req: HttpRequest, task: Json<Task>, db: Data<Db>) -> imp
 }
 
 #[patch("/finish_task")]
-pub async fn end_task(req: HttpRequest, task: Json<Task>, db: Data<Db>) -> impl Responder {
+pub async fn finish_task(req: HttpRequest, task: Json<Task>, db: Data<Db>) -> impl Responder {
     let authorization = req.headers().get("Authorization");
 
     match validate_token(authorization) {
         Ok(user_id) => match finish_task_and_save_time(user_id, task.id, &db).await {
-            Ok(_) => HttpResponse::Ok().body("Task started"),
+            Ok(done) => HttpResponse::Ok().body({
+                if done {
+                    "Task finished"
+                } else {
+                    "Task already finished"
+                }
+            }),
             Err(_) => HttpResponse::InternalServerError().body("Error posting tasks"),
         },
         Err(error_message) => HttpResponse::Unauthorized().body(error_message),
