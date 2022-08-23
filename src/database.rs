@@ -1,6 +1,6 @@
 use crate::hashing::hash;
 
-use crate::model::{DBUser, Db, Login, NewTask, Task, User};
+use crate::model::{DBUser, Db, History, Login, NewTask, ResponseTask, Task, TaskHistory, User};
 
 use actix_web::web::Data;
 
@@ -87,21 +87,42 @@ pub async fn start_task_and_save_time(
     task_id: i32,
     db: &Data<Db>,
 ) -> Result<bool, sqlx::Error> {
-    let rows_affected = sqlx::query!(
+    let task_history = sqlx::query!(
         r#"
-	UPDATE tasks
-	SET status = 2,
-	start_time = NOW()
-	WHERE id = ? AND user_id = ? AND status = 1
-		"#,
-        task_id,
+			SELECT start_time, finish_time, task_id
+			FROM task_history
+			WHERE user_id = ? AND task_id = ?
+			"#,
         user_id,
+        task_id,
     )
-    .execute(&db.pool)
-    .await?
-    .rows_affected();
+    .fetch_all(&db.pool)
+    .await?;
 
-    Ok(rows_affected > 0)
+    /* println!("{:#?}", task_history); */
+
+    if task_history.len() == 0 || task_history[task_history.len() - 1].finish_time.is_none() {
+        Ok(false)
+    } else {
+        sqlx::query!(
+            r#"
+				INSERT INTO task_history ( user_id, task_id, start_time )
+			VALUES ( ?, ?, NOW() )
+				"#,
+            user_id,
+            task_id,
+        )
+        .execute(&db.pool)
+        .await?;
+
+        Ok(true)
+    }
+
+    /* match task_history.finish_time {
+           Some(_) => {}
+           None => Ok(false),
+       }
+    */
 }
 
 /// It updates the status of a task to 3 (finished) and sets the finish time to the current time
@@ -122,10 +143,9 @@ pub async fn finish_task_and_save_time(
 ) -> Result<bool, sqlx::Error> {
     let rows_affected = sqlx::query!(
         r#"
-	UPDATE todos
-	SET status = 3,
-	finish_time = NOW()
-	WHERE id = ? AND user_id = ? AND status = 2
+	UPDATE task_history
+	SET finish_time = NOW()
+	WHERE task_id = ? AND user_id = ? AND start_time IS NOT NULL AND finish_time IS NULL
 		"#,
         task_id,
         user_id,
@@ -156,8 +176,8 @@ pub async fn add_task(
 ) -> Result<MySqlQueryResult, sqlx::Error> {
     sqlx::query!(
         r#"
-		INSERT INTO tasks ( user_id, name, description, status )
-			VALUES ( ?, ?, ?, 1 )
+		INSERT INTO tasks ( user_id, name, description )
+			VALUES ( ?, ?, ? )
 			"#,
         user_id,
         task.name,
@@ -167,41 +187,59 @@ pub async fn add_task(
     .await
 }
 
-/// It takes a user id and a database connection, and returns a vector of tasks
+/// It's getting all the tasks for a user, and then getting all the history for those tasks, and then
+/// returning a list of tasks with their history
 ///
 /// Arguments:
 ///
-/// * `user_id`: The user id of the user whose tasks we want to get.
-/// * `db`: &Data<Db> - this is the database connection pool that we created in the main.rs file.
+/// * `user_id`: i32 - The user id that we're going to use to get the tasks.
+/// * `db`: &Data<Db> - This is the database connection pool.
 ///
 /// Returns:
 ///
-/// A vector of tasks
-pub async fn get_tasks_by_user(user_id: i32, db: &Data<Db>) -> Result<Vec<Task>, sqlx::Error> {
+/// A vector of ResponseTask structs.
+pub async fn get_tasks_by_user(
+    user_id: i32,
+    db: &Data<Db>,
+) -> Result<Vec<ResponseTask>, sqlx::Error> {
     let tasks = sqlx::query_as!(
         Task,
         r#"
-		SELECT id, name, description, status FROM tasks WHERE user_id = ?"#,
+		SELECT id, name, description FROM tasks WHERE user_id = ?"#,
         user_id,
     )
     .fetch_all(&db.pool)
     .await?;
 
-    let tasks = tasks
-        .into_iter()
-        .map(|task| Task {
-            id: task.id,
-            name: task.name,
-            description: task.description,
-            status: task.status,
-            /*  start_time: match task.start_time {
-                Some(start_time) => Some(start_time.unix_timestamp()),
-                None => None,
-            },
-            finish_time: match task.finish_time {
-                Some(finish_time) => Some(finish_time.unix_timestamp()),
-                None => None,
-            }, */
+    let tasks_history = sqlx::query_as!(
+        History,
+        r#"
+		SELECT task_id, start_time, finish_time FROM task_history WHERE user_id = ?"#,
+        user_id,
+    )
+    .fetch_all(&db.pool)
+    .await?;
+
+    let tasks: Vec<ResponseTask> = tasks
+        .iter()
+        .map(|task| {
+            // It's creating a new ResponseTask struct and returning it.
+            ResponseTask {
+                id: task.id,
+                name: task.name.clone(),
+                description: task.description.clone(),
+                history: tasks_history
+                    .iter()
+                    .filter(|history| history.task_id == task.id)
+                    .map(|history| TaskHistory {
+                        start_time: history.start_time.unix_timestamp(),
+                        finish_time: match history.finish_time {
+                            Some(finish_time) => Some(finish_time.unix_timestamp()),
+                            None => None,
+                        },
+                    })
+                    .collect(),
+            }
         })
         .collect();
 
