@@ -31,7 +31,6 @@ pub struct Db {
 pub struct NewTask {
     pub name: String,
     pub description: String,
-    pub status: i16,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -39,18 +38,20 @@ pub struct Task {
     pub id: i32,
     pub name: String,
     pub description: String,
-    pub status: i16,
-    pub start_time: Option<i64>,
-    pub finish_time: Option<i64>,
 }
 
-pub struct DBTask {
+#[derive(Serialize)]
+pub struct TaskHistory {
+    pub start_time: i64,          /* Date expressed in seconds */
+    pub finish_time: Option<i64>, /* Date expressed in seconds */
+}
+
+#[derive(Serialize)]
+pub struct ResponseTask {
     pub id: i32,
     pub name: String,
     pub description: String,
-    pub status: i16,
-    pub start_time: Option<OffsetDateTime>,
-    pub finish_time: Option<OffsetDateTime>,
+    pub history: Vec<TaskHistory>,
 }
 
 #[derive(Serialize)]
@@ -67,4 +68,11 @@ pub struct Claims {
 #[derive(Deserialize /* Serialize */)]
 pub struct TaskId {
     pub id: i32,
+}
+
+/* #[derive(Clone)] */
+pub struct History {
+    pub task_id: i32,
+    pub start_time: OffsetDateTime,
+    pub finish_time: Option<OffsetDateTime>,
 }
