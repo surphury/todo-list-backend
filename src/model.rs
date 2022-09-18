@@ -1,4 +1,4 @@
-use actix_web::cookie::time::OffsetDateTime;
+use actix_web::{cookie::time::OffsetDateTime, HttpResponse};
 
 use serde::{Deserialize, Serialize};
 
@@ -75,4 +75,59 @@ pub struct History {
     pub task_id: i32,
     pub start_time: OffsetDateTime,
     pub finish_time: Option<OffsetDateTime>,
+}
+
+pub enum TaskError {
+    InvalidId,
+    IsPending,
+    DbError(sqlx::Error),
+}
+
+impl From<sqlx::Error> for TaskError {
+    fn from(error: sqlx::Error) -> Self {
+        TaskError::DbError(error)
+    }
+}
+
+impl TaskError {
+    pub fn message(self) -> HttpResponse {
+        match self {
+            TaskError::InvalidId => {
+                HttpResponse::NotFound().body("There is no task with the provided id")
+            }
+            TaskError::IsPending => {
+                HttpResponse::Conflict().body("The tasks hasn't been completed yet")
+            }
+            TaskError::DbError(err) => {
+                println!("{:#?}", err);
+                HttpResponse::InternalServerError().body("Couldn't complete operation")
+            }
+        }
+    }
+}
+
+pub enum VerificationError {
+    InvalidToken,
+    EmptyToken,
+    /* ServerFailedVerifyingToken */
+}
+
+/* impl From<VerificationError> for HttpResponse {
+    fn from(error: VerificationError) -> Self {
+        error.message()
+    }
+} */
+
+impl VerificationError {
+    pub fn message(self) -> HttpResponse {
+        match self {
+            VerificationError::EmptyToken => {
+                HttpResponse::Unauthorized().body("Empty validation token")
+            }
+            VerificationError::InvalidToken => HttpResponse::Unauthorized().body("Invalid Token"),
+            /* VerificationError::ServerFailedVerifyingToken => {
+                HttpResponse::ServiceUnavailable().body("Not able to verify at the moment")
+            } */
+        }
+    }
 }
