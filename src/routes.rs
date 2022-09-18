@@ -4,9 +4,9 @@ use crate::utils::validate_token;
 
 use super::database::{add_task, delete_task, get_tasks_by_user, insert_new_user, verify_password};
 
-use super::model::{Db, Login, NewTask, Task, TaskId, User};
+use super::model::{Db, Login, NewTask, TaskId, User};
 
-use actix_web::web::{Data, Json};
+use actix_web::web::{Data, Json, Path};
 use actix_web::{delete, get, patch, post, HttpRequest, HttpResponse, Responder};
 
 #[post("/register_user")]
@@ -56,13 +56,12 @@ pub async fn get_tasks(req: HttpRequest, db: Data<Db>) -> impl Responder {
     match validate_token(authorization) {
         Ok(user_id) => {
             let tasks = get_tasks_by_user(user_id, &db).await;
-
             match tasks {
                 Ok(tasks) => HttpResponse::Ok().json(tasks),
                 Err(_) => HttpResponse::InternalServerError().body("Error getting tasks"),
             }
         }
-        Err(error_message) => HttpResponse::Unauthorized().body(error_message),
+        Err(error) => error.message(),
     }
 }
 
@@ -75,7 +74,7 @@ pub async fn delete_tasks(req: HttpRequest, task: Json<TaskId>, db: Data<Db>) ->
             Ok(_) => HttpResponse::Ok().body("Task deleted"),
             Err(_) => HttpResponse::InternalServerError().body("Error deleting task"),
         },
-        Err(error_message) => HttpResponse::Unauthorized().body(error_message),
+        Err(error) => error.message(),
     }
 }
 
@@ -96,47 +95,46 @@ pub async fn post_task(req: HttpRequest, task: Json<NewTask>, db: Data<Db>) -> i
             },
             Err(_) => HttpResponse::InternalServerError().body("Error posting tasks"),
         },
-        Err(error_message) => HttpResponse::Unauthorized().body(error_message),
+        Err(error) => error.message(),
     }
 }
 
-#[patch("/tasks")]
-pub async fn start_task(req: HttpRequest, task: Json<Task>, db: Data<Db>) -> impl Responder {
+#[patch("/start_task/{task_id}")]
+pub async fn start_task(task_id: Path<i32>, req: HttpRequest, db: Data<Db>) -> impl Responder {
+    let task_id = task_id.into_inner();
     let authorization = req.headers().get("Authorization");
 
     match validate_token(authorization) {
-        Ok(user_id) => match start_task_and_save_time(user_id, task.id, &db).await {
-            Ok(done) => HttpResponse::Ok().body({
-                if done {
-                    "Task started"
+        Ok(user_id) => match start_task_and_save_time(task_id, user_id, &db).await {
+            Ok(has_started_task) => {
+                if has_started_task {
+                    HttpResponse::Accepted().body("Started")
                 } else {
-                    "Task already started"
+                    HttpResponse::Conflict().body("Couldn't be started")
                 }
-            }),
-            Err(error) => {
-                println!("{:?}", error);
-                HttpResponse::InternalServerError().body("Error starting tasks")
             }
+            Err(error) => error.message(),
         },
-        Err(error_message) => HttpResponse::Unauthorized().body(error_message),
+        Err(error) => error.message(),
     }
 }
 
-#[patch("/finish_task")]
-pub async fn finish_task(req: HttpRequest, task: Json<Task>, db: Data<Db>) -> impl Responder {
+#[patch("/finish_task/{task_id}")]
+pub async fn finish_task(task_id: Path<i32>, req: HttpRequest, db: Data<Db>) -> impl Responder {
+    let task_id = task_id.into_inner();
     let authorization = req.headers().get("Authorization");
 
     match validate_token(authorization) {
-        Ok(user_id) => match finish_task_and_save_time(user_id, task.id, &db).await {
-            Ok(done) => HttpResponse::Ok().body({
-                if done {
-                    "Task finished"
+        Ok(user_id) => match finish_task_and_save_time(task_id, user_id, &db).await {
+            Ok(updated) => {
+                if updated {
+                    HttpResponse::Accepted().body("Task finished")
                 } else {
-                    "Task already finished"
+                    HttpResponse::Conflict().body("Task already finished")
                 }
-            }),
-            Err(_) => HttpResponse::InternalServerError().body("Error posting tasks"),
+            }
+            Err(err) => err.message(),
         },
-        Err(error_message) => HttpResponse::Unauthorized().body(error_message),
+        Err(error) => error.message(),
     }
 }
