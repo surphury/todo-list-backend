@@ -1,6 +1,8 @@
 use crate::hashing::hash;
 
-use crate::model::{DBUser, Db, History, Login, NewTask, ResponseTask, Task, TaskHistory, User};
+use crate::model::{
+    DBUser, Db, History, Login, NewTask, ResponseTask, Task, TaskError, TaskHistory, User,
+};
 
 use actix_web::web::Data;
 
@@ -71,22 +73,57 @@ pub async fn delete_task(id: i32, user_id: i32, db: &Data<Db>) -> Result<MySqlQu
     .await
 }
 
-/// It updates the status of a task to 2 (in progress) and saves the current time as the start time
+/// It checks if a task id is invalid
 ///
 /// Arguments:
 ///
-/// * `user_id`: The user id of the user who is starting the task.
-/// * `task_id`: The id of the task to be started.
+/// * `task_id`: The id of the task to be checked
+/// * `user_id`: The user id of the user who is trying to access the task.
 /// * `db`: &Data<Db> - This is the database connection pool that we created in the main.rs file.
 ///
 /// Returns:
 ///
 /// A boolean value.
-pub async fn start_task_and_save_time(
-    user_id: i32,
+pub async fn is_an_invalid_task_id(
     task_id: i32,
+    user_id: i32,
     db: &Data<Db>,
 ) -> Result<bool, sqlx::Error> {
+    let task = sqlx::query!(
+        r#"
+		SELECT * 
+		FROM tasks 
+		WHERE id = ? AND user_id = ?
+			"#,
+        task_id,
+        user_id,
+    )
+    .fetch_all(&db.pool)
+    .await?;
+
+    Ok(task.len() == 0)
+}
+
+/// It starts a task and saves the time
+///
+/// Arguments:
+///
+/// * `user_id`: The user id of the user who is starting the task.
+/// * `task_id`: The id of the task to start
+/// * `db`: &Data<Db> - this is the database connection pool that we created in the main.rs file.
+///
+/// Returns:
+///
+/// The number of rows affected by the query.
+pub async fn start_task_and_save_time(
+    task_id: i32,
+    user_id: i32,
+    db: &Data<Db>,
+) -> Result<bool, TaskError> {
+    if is_an_invalid_task_id(task_id, user_id, db).await? {
+        return Err(TaskError::InvalidId);
+    }
+
     let task_history = sqlx::query!(
         r#"
 			SELECT start_time, finish_time, task_id
@@ -99,30 +136,24 @@ pub async fn start_task_and_save_time(
     .fetch_all(&db.pool)
     .await?;
 
-    /* println!("{:#?}", task_history); */
-
-    if task_history.len() == 0 || task_history[task_history.len() - 1].finish_time.is_none() {
-        Ok(false)
-    } else {
-        sqlx::query!(
+    if task_history.len() == 0 || task_history[task_history.len() - 1].finish_time.is_some() {
+        let has_started_task = sqlx::query!(
             r#"
-				INSERT INTO task_history ( user_id, task_id, start_time )
-			VALUES ( ?, ?, NOW() )
-				"#,
+			INSERT INTO task_history ( user_id, task_id, start_time )
+		VALUES ( ?, ?, NOW() )
+			"#,
             user_id,
             task_id,
         )
         .execute(&db.pool)
-        .await?;
+        .await?
+        .rows_affected()
+            == 1;
 
-        Ok(true)
+        Ok(has_started_task)
+    } else {
+        Err(TaskError::IsPending)
     }
-
-    /* match task_history.finish_time {
-           Some(_) => {}
-           None => Ok(false),
-       }
-    */
 }
 
 /// It updates the status of a task to 3 (finished) and sets the finish time to the current time
@@ -137,24 +168,28 @@ pub async fn start_task_and_save_time(
 ///
 /// A boolean value.
 pub async fn finish_task_and_save_time(
-    user_id: i32,
     task_id: i32,
+    user_id: i32,
     db: &Data<Db>,
-) -> Result<bool, sqlx::Error> {
-    let rows_affected = sqlx::query!(
+) -> Result<bool, TaskError> {
+    if is_an_invalid_task_id(task_id, user_id, db).await? {
+        return Err(TaskError::InvalidId);
+    }
+    let is_task_finished = sqlx::query!(
         r#"
-	UPDATE task_history
-	SET finish_time = NOW()
-	WHERE task_id = ? AND user_id = ? AND start_time IS NOT NULL AND finish_time IS NULL
-		"#,
+		UPDATE task_history
+		SET finish_time = NOW()
+		WHERE task_id = ? AND user_id = ? AND start_time IS NOT NULL AND finish_time IS NULL
+			"#,
         task_id,
         user_id,
     )
     .execute(&db.pool)
     .await?
-    .rows_affected();
+    .rows_affected()
+        == 1;
 
-    Ok(rows_affected > 0)
+    Ok(is_task_finished)
 }
 
 /// It takes a user_id, a NewTask struct, and a database connection, and returns a Result containing
