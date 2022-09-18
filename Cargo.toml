@@ -7,15 +7,15 @@ author = "surphury"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix-web = "4.1.0"
+actix-web = "4.2.1"
 dotenv = "0.15.0"
-serde = { version = "1.0.140", features = ["derive"] }
+serde = { version = "1.0.144", features = ["derive"] }
 rust-argon2 = "1.0.0"
 jsonwebtoken = "8.1.1"
-actix-cors = "0.6.1"
+actix-cors = "0.6.2"
 
 [dependencies.sqlx]
-version = "0.6.0"
+version = "0.6.2"
 default-features = false
 features = [
     "runtime-actix-rustls",
