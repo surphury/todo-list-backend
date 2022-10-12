@@ -1,10 +1,10 @@
-use crate::database::{finish_task_and_save_time, start_task_and_save_time};
+use crate::database::{finish_task_and_save_time, start_task_and_save_time,add_task, delete_task, get_tasks_by_user, insert_new_user, verify_password};
+
 use crate::jwt::generate_token;
+
 use crate::utils::validate_token;
 
-use super::database::{add_task, delete_task, get_tasks_by_user, insert_new_user, verify_password};
-
-use super::model::{Db, Login, NewTask, TaskId, User};
+use crate::model::{Db, Login, NewTask, TaskId, User};
 
 use actix_web::web::{Data, Json, Path};
 use actix_web::{delete, get, patch, post, HttpRequest, HttpResponse, Responder};
