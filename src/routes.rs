@@ -1,4 +1,7 @@
-use crate::database::{finish_task_and_save_time, start_task_and_save_time,add_task, delete_task, get_tasks_by_user, insert_new_user, verify_password};
+use crate::database::{
+    add_task, delete_task, finish_task_and_save_time, get_tasks_by_user, insert_new_user,
+    start_task_and_save_time, verify_password,
+};
 
 use crate::jwt::generate_token;
 
@@ -7,9 +10,8 @@ use crate::utils::validate_token;
 use crate::model::{Db, Login, NewTask, TaskId, User};
 
 use actix_web::web::{Data, Json, Path};
-use actix_web::{delete, get, patch, post, HttpRequest, HttpResponse, Responder};
+use actix_web::{HttpRequest, HttpResponse, Responder};
 
-#[post("/register_user")]
 pub async fn register_user(new_user: Json<User>, db: Data<Db>) -> impl Responder {
     let new_user = User {
         password: new_user.password.clone(),
@@ -23,7 +25,6 @@ pub async fn register_user(new_user: Json<User>, db: Data<Db>) -> impl Responder
     }
 }
 
-#[post("/login")]
 pub async fn login(user: Json<Login>, db: Data<Db>) -> impl Responder {
     let user = Login {
         password: user.password.clone(),
@@ -49,7 +50,6 @@ pub async fn login(user: Json<Login>, db: Data<Db>) -> impl Responder {
     }
 }
 
-#[get("/tasks")]
 pub async fn get_tasks(req: HttpRequest, db: Data<Db>) -> impl Responder {
     let authorization = req.headers().get("Authorization");
 
@@ -65,7 +65,6 @@ pub async fn get_tasks(req: HttpRequest, db: Data<Db>) -> impl Responder {
     }
 }
 
-#[delete("/tasks")]
 pub async fn delete_tasks(req: HttpRequest, task: Json<TaskId>, db: Data<Db>) -> impl Responder {
     let authorization = req.headers().get("Authorization");
 
@@ -78,7 +77,6 @@ pub async fn delete_tasks(req: HttpRequest, task: Json<TaskId>, db: Data<Db>) ->
     }
 }
 
-#[post("/tasks")]
 pub async fn post_task(req: HttpRequest, task: Json<NewTask>, db: Data<Db>) -> impl Responder {
     let authorization = req.headers().get("Authorization");
 
@@ -99,40 +97,27 @@ pub async fn post_task(req: HttpRequest, task: Json<NewTask>, db: Data<Db>) -> i
     }
 }
 
-#[patch("/start_task/{task_id}")]
 pub async fn start_task(task_id: Path<i32>, req: HttpRequest, db: Data<Db>) -> impl Responder {
     let task_id = task_id.into_inner();
     let authorization = req.headers().get("Authorization");
 
     match validate_token(authorization) {
         Ok(user_id) => match start_task_and_save_time(task_id, user_id, &db).await {
-            Ok(has_started_task) => {
-                if has_started_task {
-                    HttpResponse::Accepted().body("Started")
-                } else {
-                    HttpResponse::Conflict().body("Couldn't be started")
-                }
-            }
+            Ok(task_history) => HttpResponse::Accepted().json(task_history),
             Err(error) => error.message(),
         },
         Err(error) => error.message(),
     }
 }
 
-#[patch("/finish_task/{task_id}")]
 pub async fn finish_task(task_id: Path<i32>, req: HttpRequest, db: Data<Db>) -> impl Responder {
     let task_id = task_id.into_inner();
     let authorization = req.headers().get("Authorization");
 
     match validate_token(authorization) {
         Ok(user_id) => match finish_task_and_save_time(task_id, user_id, &db).await {
-            Ok(updated) => {
-                if updated {
-                    HttpResponse::Accepted().body("Task finished")
-                } else {
-                    HttpResponse::Conflict().body("Task already finished")
-                }
-            }
+            Ok(task_history) => HttpResponse::Accepted().json(task_history),
+
             Err(err) => err.message(),
         },
         Err(error) => error.message(),

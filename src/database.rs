@@ -7,35 +7,89 @@ use crate::model::{
 use actix_web::web::Data;
 
 use sqlx::mysql::{MySqlPool, MySqlQueryResult};
-use sqlx::Error;
 
 use std::result::Result;
 
-/// `connect` takes a URL as a string and returns a `MySqlPool` or an `Error`
+/// `connect` takes a string, `url`, and returns a `Result<MySqlPool, sqlx::Error>`
 ///
 /// Arguments:
 ///
-/// * `url`: The URL to the database.
+/// * `url`: The URL to connect to the database.
 ///
 /// Returns:
 ///
-/// A Result<MySqlPool, Error>
-pub async fn connect(url: &str) -> Result<MySqlPool, Error> {
+/// A connection pool to the database.
+pub async fn connect(url: &str) -> Result<MySqlPool, sqlx::Error> {
     let pool = MySqlPool::connect(url).await;
     pool
 }
 
-/// It takes a `User` struct and a `Data<Db>` struct, and returns a `Result<MySqlQueryResult, Error>`
+/// It fetches a task from the database and returns it as a `ResponseTask` struct
 ///
 /// Arguments:
 ///
-/// * `user`: User - This is the user object that we're going to insert into the database.
-/// * `db`: &Data<Db>
+/// * `task_id`: The ID of the task to fetch.
+/// * `user_id`: The user ID of the user who is requesting the task.
+/// * `db`: &Data<Db> - this is the database connection pool that we created in the main.rs file.
 ///
 /// Returns:
 ///
-/// A Result<MySqlQueryResult, Error>
-pub async fn insert_new_user(user: User, db: &Data<Db>) -> Result<MySqlQueryResult, Error> {
+/// A ResponseTask
+pub async fn fetch_task(
+    task_id: i32,
+    user_id: i32,
+    db: &Data<Db>,
+) -> Result<ResponseTask, sqlx::Error> {
+    let task = sqlx::query_as!(
+        Task,
+        r#"
+		SELECT id, name, description FROM tasks WHERE user_id = ?"#,
+        user_id,
+    )
+    .fetch_one(&db.pool)
+    .await?;
+
+    let tasks_history = sqlx::query_as!(
+        History,
+        r#"
+		SELECT task_id, start_time, finish_time FROM task_history WHERE user_id = ? AND task_id = ?"#,
+        user_id,
+        task_id
+    )
+    .fetch_all(&db.pool)
+    .await?;
+
+    let task = ResponseTask {
+        id: task.id,
+        name: task.name.clone(),
+        description: task.description.clone(),
+        history: tasks_history
+            .iter()
+            .filter(|history| history.task_id == task.id)
+            .map(|history| TaskHistory {
+                start_time: history.start_time.unix_timestamp(),
+                finish_time: match history.finish_time {
+                    Some(finish_time) => Some(finish_time.unix_timestamp()),
+                    None => None,
+                },
+            })
+            .collect(),
+    };
+
+    Ok(task)
+}
+
+/// It deletes a task from the database
+///
+/// Arguments:
+///
+/// * `user`: User - This is the user struct that we created in the models.rs file.
+/// * `db`: &Data<Db> - This is the database connection pool that we created in the main.rs file.
+///
+/// Returns:
+///
+/// A Result<MySqlQueryResult, sqlx::Error>
+pub async fn insert_new_user(user: User, db: &Data<Db>) -> Result<MySqlQueryResult, sqlx::Error> {
     sqlx::query!(
         r#"
 		INSERT INTO users ( username, email, password )
@@ -53,14 +107,18 @@ pub async fn insert_new_user(user: User, db: &Data<Db>) -> Result<MySqlQueryResu
 ///
 /// Arguments:
 ///
-/// * `id`: i32 - The id of the task to delete
-/// * `user_id`: The user id of the user who created the task.
+/// * `id`: The id of the task to delete
+/// * `user_id`: The user_id of the user who created the task.
 /// * `db`: &Data<Db> - This is the database connection pool that we created in the main.rs file.
 ///
 /// Returns:
 ///
-/// A Result<MySqlQueryResult, Error>
-pub async fn delete_task(id: i32, user_id: i32, db: &Data<Db>) -> Result<MySqlQueryResult, Error> {
+/// A Result<MySqlQueryResult, sqlx::Error>
+pub async fn delete_task(
+    id: i32,
+    user_id: i32,
+    db: &Data<Db>,
+) -> Result<MySqlQueryResult, sqlx::Error> {
     sqlx::query!(
         r#"
 		DELETE FROM tasks
@@ -78,7 +136,7 @@ pub async fn delete_task(id: i32, user_id: i32, db: &Data<Db>) -> Result<MySqlQu
 /// Arguments:
 ///
 /// * `task_id`: The id of the task to be checked
-/// * `user_id`: The user id of the user who is trying to access the task.
+/// * `user_id`: The user id of the user who created the task.
 /// * `db`: &Data<Db> - This is the database connection pool that we created in the main.rs file.
 ///
 /// Returns:
@@ -88,7 +146,7 @@ pub async fn is_an_invalid_task_id(
     task_id: i32,
     user_id: i32,
     db: &Data<Db>,
-) -> Result<bool, sqlx::Error> {
+) -> Result<bool, TaskError> {
     let task = sqlx::query!(
         r#"
 		SELECT * 
@@ -108,18 +166,18 @@ pub async fn is_an_invalid_task_id(
 ///
 /// Arguments:
 ///
-/// * `user_id`: The user id of the user who is starting the task.
 /// * `task_id`: The id of the task to start
-/// * `db`: &Data<Db> - this is the database connection pool that we created in the main.rs file.
+/// * `user_id`: The user id of the user who is starting the task.
+/// * `db`: &Data<Db>
 ///
 /// Returns:
 ///
-/// The number of rows affected by the query.
+/// A Result<ResponseTask, TaskError>
 pub async fn start_task_and_save_time(
     task_id: i32,
     user_id: i32,
     db: &Data<Db>,
-) -> Result<bool, TaskError> {
+) -> Result<ResponseTask, TaskError> {
     if is_an_invalid_task_id(task_id, user_id, db).await? {
         return Err(TaskError::InvalidId);
     }
@@ -136,8 +194,11 @@ pub async fn start_task_and_save_time(
     .fetch_all(&db.pool)
     .await?;
 
-    if task_history.len() == 0 || task_history[task_history.len() - 1].finish_time.is_some() {
-        let has_started_task = sqlx::query!(
+    let is_startable =
+        task_history.len() == 0 || task_history[task_history.len() - 1].finish_time.is_some();
+
+    if is_startable {
+        sqlx::query!(
             r#"
 			INSERT INTO task_history ( user_id, task_id, start_time )
 		VALUES ( ?, ?, NOW() )
@@ -146,36 +207,38 @@ pub async fn start_task_and_save_time(
             task_id,
         )
         .execute(&db.pool)
-        .await?
-        .rows_affected()
-            == 1;
+        .await?;
 
-        Ok(has_started_task)
+        let task = fetch_task(task_id, user_id, db).await?;
+        Ok(task)
     } else {
-        Err(TaskError::IsPending)
+        Err(TaskError::NotFinished)
     }
 }
 
-/// It updates the status of a task to 3 (finished) and sets the finish time to the current time
+/// "If the task is valid, then finish the task and return the task."
+///
+/// The first thing we do is check if the task is valid. If it's not, then we return an error
 ///
 /// Arguments:
 ///
-/// * `user_id`: The user id of the user who owns the task.
-/// * `task_id`: The id of the task to be finished.
-/// * `db`: &Data<Db> - This is the database connection pool that we created in the main.rs file.
+/// * `task_id`: The id of the task to finish.
+/// * `user_id`: The user id of the user who is trying to finish the task.
+/// * `db`: &Data<Db> - this is the database connection pool.
 ///
 /// Returns:
 ///
-/// A boolean value.
+/// A Result<ResponseTask, TaskError>
 pub async fn finish_task_and_save_time(
     task_id: i32,
     user_id: i32,
     db: &Data<Db>,
-) -> Result<bool, TaskError> {
+) -> Result<ResponseTask, TaskError> {
     if is_an_invalid_task_id(task_id, user_id, db).await? {
         return Err(TaskError::InvalidId);
     }
-    let is_task_finished = sqlx::query!(
+
+    let affected_rows = sqlx::query!(
         r#"
 		UPDATE task_history
 		SET finish_time = NOW()
@@ -186,10 +249,14 @@ pub async fn finish_task_and_save_time(
     )
     .execute(&db.pool)
     .await?
-    .rows_affected()
-        == 1;
+    .rows_affected();
 
-    Ok(is_task_finished)
+    if affected_rows == 1 {
+        let task = fetch_task(task_id, user_id, db).await?;
+        Ok(task)
+    } else {
+        Err(TaskError::NotStarted)
+    }
 }
 
 /// It takes a user_id, a NewTask struct, and a database connection, and returns a Result containing
@@ -197,7 +264,7 @@ pub async fn finish_task_and_save_time(
 ///
 /// Arguments:
 ///
-/// * `user_id`: The user id of the user who created the task.
+/// * `user_id`: i32 - The user id of the user who created the task.
 /// * `task`: NewTask - This is the struct that we defined earlier.
 /// * `db`: &Data<Db> - This is the database connection pool that we created in the main.rs file.
 ///
@@ -222,12 +289,11 @@ pub async fn add_task(
     .await
 }
 
-/// It's getting all the tasks for a user, and then getting all the history for those tasks, and then
-/// returning a list of tasks with their history
+/// It's getting all the tasks for a user and returning them as a `Vec<ResponseTask>`
 ///
 /// Arguments:
 ///
-/// * `user_id`: i32 - The user id that we're going to use to get the tasks.
+/// * `user_id`: i32 - The user ID that we're getting tasks for.
 /// * `db`: &Data<Db> - This is the database connection pool.
 ///
 /// Returns:
@@ -286,7 +352,7 @@ pub async fn get_tasks_by_user(
 /// Arguments:
 ///
 /// * `user`: &Login - This is the struct that we created earlier.
-/// * `db`: &Data<Db>
+/// * `db`: &Data<Db> - This is the database connection pool that we created in the main.rs file.
 ///
 /// Returns:
 ///

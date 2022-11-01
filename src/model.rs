@@ -40,13 +40,13 @@ pub struct Task {
     pub description: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct TaskHistory {
     pub start_time: i64,          /* Date expressed in seconds */
     pub finish_time: Option<i64>, /* Date expressed in seconds */
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ResponseTask {
     pub id: i32,
     pub name: String,
@@ -79,7 +79,8 @@ pub struct History {
 
 pub enum TaskError {
     InvalidId,
-    IsPending,
+    NotFinished,
+    NotStarted,
     DbError(sqlx::Error),
 }
 
@@ -95,8 +96,11 @@ impl TaskError {
             TaskError::InvalidId => {
                 HttpResponse::NotFound().body("There is no task with the provided id")
             }
-            TaskError::IsPending => {
+            TaskError::NotFinished => {
                 HttpResponse::Conflict().body("The tasks hasn't been completed yet")
+            }
+            TaskError::NotStarted => {
+                HttpResponse::Conflict().body("The tasks hasn't been started yet")
             }
             TaskError::DbError(err) => {
                 println!("{:#?}", err);
@@ -105,7 +109,6 @@ impl TaskError {
         }
     }
 }
-
 pub enum VerificationError {
     InvalidToken,
     EmptyToken,
@@ -125,9 +128,6 @@ impl VerificationError {
                 HttpResponse::Unauthorized().body("Empty validation token")
             }
             VerificationError::InvalidToken => HttpResponse::Unauthorized().body("Invalid Token"),
-            /* VerificationError::ServerFailedVerifyingToken => {
-                HttpResponse::ServiceUnavailable().body("Not able to verify at the moment")
-            } */
         }
     }
 }

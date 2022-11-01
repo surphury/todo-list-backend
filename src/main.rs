@@ -8,6 +8,7 @@ mod utils;
 /* #[cfg(test)]
 mod test; */
 
+use actix_web::web;
 use actix_web::web::Data;
 use actix_web::{http, App, HttpServer};
 
@@ -53,13 +54,13 @@ async fn main() -> Result<(), io::Error> {
         App::new()
             .app_data(Data::new(Db { pool: pool.clone() }))
             .wrap(cors)
-            .service(login)
-            .service(get_tasks)
-            .service(post_task)
-            .service(register_user)
-            .service(delete_tasks)
-            .service(start_task)
-            .service(finish_task)
+            .route("/register_user", web::post().to(register_user))
+            .route("/login", web::post().to(login))
+            .route("/tasks", web::get().to(get_tasks))
+            .route("/tasks", web::post().to(post_task))
+            .route("/tasks", web::delete().to(delete_tasks))
+            .route("/start_task/{task_id}", web::patch().to(start_task))
+            .route("/finish_task/{task_id}", web::patch().to(finish_task))
     })
     .bind(("127.0.0.1", port))?
     .run()
